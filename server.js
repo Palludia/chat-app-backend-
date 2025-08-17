@@ -61,10 +61,7 @@ app
     const newMessage = {
       text,
       username,
-      timeStamp: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      timeStamp: new Date().toISOString(),
     };
 
     try {
