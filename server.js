@@ -65,6 +65,13 @@ const io = new Server(server, {
 io.on("connection", async (socket) => {
   console.log("A user connected:", socket.id);
 
+  try {
+    const messages = await messageCollection.find().toArray();
+    socket.emit("initial messages", messages);
+  } catch (err) {
+    console.error("Erorr:", err);
+  }
+
   // Listen for new messages
   socket.on("chat message", async (msg) => {
     // Add timestamp on the backend for consistency
