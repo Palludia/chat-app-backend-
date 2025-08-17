@@ -1,73 +1,88 @@
+// backend/server.js
 require("dotenv").config();
 
 const { MongoClient } = require("mongodb");
 const express = require("express");
-const app = express();
-const PORT = 3001;
+const { Server } = require("socket.io");
 const cors = require("cors");
+const app = express();
+
+const PORT = process.env.PORT || 3001;
 const uri = process.env.MONGODB_URI;
 
-let client;
-let db;
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// MongoDB connection
 let messageCollection;
 
 async function connectDB() {
   try {
-    client = new MongoClient(uri);
+    const client = new MongoClient(uri);
     await client.connect();
-    console.log("Connected to MongoDB Atlas");
-    db = client.db("chatapp");
+    console.log("Connected to MongoDB Atlas 🌐");
+    const db = client.db("chatapp");
     messageCollection = db.collection("messages");
-    await client.db("chatapp").command({ ping: 1 });
-    // Starting the server
-    app.listen(PORT, () => {
-      console.log(`Backend is running on http://localhost:${PORT}`);
-    });
+    await db.command({ ping: 1 });
   } catch (error) {
-    console.error("Failed to connect to MongoDB: ", error);
+    console.error("Failed to connect to MongoDB:", error);
     process.exit(1);
   }
 }
 
 connectDB();
-// Use cors to connect to frontend
-app.use(cors()); // Allowing all origins
 
-// Middleware allow express to parse json
-app.use(express.json());
-
-// simple route to test if server works
-app.get("/", (req, res) => {
-  res.send("HELLO FROM EXPRESS!");
+// REST API routes - Only keep the GET route for initial messages
+app.get("/api/messages", async (req, res) => {
+  try {
+    const messages = await messageCollection.find().toArray();
+    res.json(messages);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch messages" });
+  }
 });
 
-app
-  .route("/api/messages")
-  .get(async (req, res) => {
-    try {
-      const message = await messageCollection.find().toArray();
-      res.json(message);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch messages" });
-    }
-  })
-  .post(async (req, res) => {
-    const { text, username } = req.body;
+// Add this route to your backend file
+app.get("/", (req, res) => {
+  res.send("Backend is running.");
+});
 
-    if (!text || !username) {
-      return res.status(400).json({ error: "Text and username are required" });
-    }
+// Start HTTP server
+const server = app.listen(PORT, () => {
+  console.log(`Backend is running on http://localhost:${PORT}`);
+});
 
+// Create Socket.IO server
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+// Socket.IO logic
+io.on("connection", async (socket) => {
+  console.log("A user connected:", socket.id);
+
+  // Listen for new messages
+  socket.on("chat message", async (msg) => {
+    // Add timestamp on the backend for consistency
     const newMessage = {
-      text,
-      username,
+      ...msg,
       timeStamp: new Date().toISOString(),
     };
 
     try {
-      const sentMessage = await messageCollection.insertOne(newMessage);
-      res.status(201).json({ ...newMessage, _id: sentMessage.insertedId });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to save message" });
+      await messageCollection.insertOne(newMessage);
+      io.emit("chat message", newMessage); // Broadcast to all clients
+    } catch (err) {
+      console.error("Failed to save message:", err);
     }
   });
+
+  // Handle disconnect
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+  });
+});
